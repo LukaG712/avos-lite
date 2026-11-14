@@ -1,0 +1,12 @@
+[package]
+name = "avos-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "avos"
+path = "src/main.rs"
+
+[[bin]]
+name = "ac"
+path = "src/ac.rs"

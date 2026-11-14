@@ -1,0 +1,16 @@
+name: loop/tdd-bug-fixer
+version: "1.0.0"
+ratio: "80% deterministic / 20% LLM"
+max_iterations: 4
+steps:
+  - id: reproduce
+    mode: deterministic
+    cmd: "cargo test || pnpm test"
+  - id: patch
+    mode: llm
+    tier: balanced_1x
+    grammar: "../gbnf/tool_call.gbnf"
+  - id: verify
+    mode: deterministic
+    cmd: "cargo test && pnpm test"
+    rollback_on_fail: true

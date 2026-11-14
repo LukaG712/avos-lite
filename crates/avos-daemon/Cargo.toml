@@ -1,0 +1,4 @@
+[package]
+name = "avos-daemon"
+version.workspace = true
+edition.workspace = true

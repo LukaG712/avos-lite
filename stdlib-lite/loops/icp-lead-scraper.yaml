@@ -1,0 +1,15 @@
+name: loop/icp-lead-scraper
+version: "1.0.0"
+ratio: "80% deterministic / 20% LLM"
+max_leads: 25
+steps:
+  - id: extract
+    mode: llm
+    tier: fast_02x
+    redact_pii: true
+  - id: deduplicate
+    mode: deterministic
+    script: "dedupe_domain_list"
+  - id: queue_governance
+    mode: governance_gate
+    risk_scope: WRITE_PRODUCTION_OR_SPEND

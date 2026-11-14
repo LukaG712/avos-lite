@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/avos-cli",
+  "crates/avos-daemon",
+  "crates/avos-license",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/LukaG712/avos-lite"
