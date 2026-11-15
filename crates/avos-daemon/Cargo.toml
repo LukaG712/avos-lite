@@ -2,3 +2,8 @@
 name = "avos-daemon"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+avos-license = { path = "../avos-license" }
+serde.workspace = true
+serde_json.workspace = true
