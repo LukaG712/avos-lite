@@ -55,9 +55,10 @@ fn main() {
             Some("run") => {
                 let target = args.get(3).cloned().unwrap_or_default();
                 if target.is_empty() {
-                    Err("Usage: avos loop run <path_or_name> [--approve]".to_string())
+                    Err("Usage: avos loop run <path_or_name> [--approve] [--exec]".to_string())
                 } else {
                     let approved = args.iter().any(|a| a == "--approve");
+                    let exec_cmds = args.iter().any(|a| a == "--exec");
                     let target_path = Path::new(&target);
                     if target_path.exists() {
                         std::fs::read_to_string(target_path)
@@ -66,14 +67,22 @@ fn main() {
                                 send_rpc(
                                     &socket_path,
                                     "loop.run",
-                                    json!({ "yaml": yaml, "governance_approved": approved }),
+                                    json!({
+                                        "yaml": yaml,
+                                        "governance_approved": approved,
+                                        "execute_commands": exec_cmds
+                                    }),
                                 )
                             })
                     } else {
                         send_rpc(
                             &socket_path,
                             "loop.run",
-                            json!({ "name": target, "governance_approved": approved }),
+                            json!({
+                                "name": target,
+                                "governance_approved": approved,
+                                "execute_commands": exec_cmds
+                            }),
                         )
                     }
                 }

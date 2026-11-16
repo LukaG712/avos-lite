@@ -320,6 +320,11 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
                 .get("governance_approved")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let execute_commands = req
+                .params
+                .get("execute_commands")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let def_res = if let Some(yaml) = req.params.get("yaml").and_then(|v| v.as_str()) {
                 loops::parse_loop_yaml(yaml)
             } else if let Some(path) = req.params.get("path").and_then(|v| v.as_str()) {
@@ -339,7 +344,7 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
             };
             match def_res {
                 Ok(def) => {
-                    let report = loops::simulate_loop_execution(&def, approved);
+                    let report = loops::execute_loop(&def, approved, execute_commands);
                     ok_response(id, serde_json::to_value(report).unwrap())
                 }
                 Err(e) => err_response(id, -32602, e),
