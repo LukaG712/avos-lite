@@ -1,107 +1,263 @@
-<div align="center">
+<h1 align="center">
+  AVOS Lite
+</h1>
 
-# `AVOS // AUTONOMOUS VENTURE OS`
+<p align="center">
+  <a href="https://github.com/LukaG712/avos-lite"><img src="https://img.shields.io/github/stars/LukaG712/avos-lite?style=flat&amp;label=%E2%98%85&amp;color=08C" alt="GitHub stars" /></a>
+  <img src="https://img.shields.io/badge/version-1.0.0-08C?style=flat" alt="Version: 1.0.0" />
+  <img src="https://img.shields.io/badge/license-MIT-08C?style=flat" alt="License: MIT" />
+  <img src="https://img.shields.io/badge/Rust-2024_Edition-4493F8?style=flat-square" alt="Rust 2024 Edition" />
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Linux%20%7C%20Windows-4493F8?style=flat-square" alt="Supported platforms: macOS, Linux, and Windows" />
+</p>
 
-**Build, Secure, and Operate AI-Powered Businesses from One Command Bar.**  
-*Open-Core Rust CLI, Multi-Agent Terminal Multiplexer (`OSC 7501`), and Autonomous Execution Engine.*
+<p align="center">
+  <strong>The Open-Core Autonomous Venture CLI &amp; Local Runtime.</strong><br/>
+  Run deterministic YAML agent loops, manage autonomy levels (0–4), and orchestrate local or BYOK models from one Rust binary and a single <code>avos.toml</code> manifest.
+</p>
 
-[![AVOS Version](https://img.shields.io/badge/AVOS-v1.0.0-232323?style=flat-square&labelColor=1A1A1A)](https://avos.sh)
-[![Architecture](https://img.shields.io/badge/MCP_GATEWAY-50_CONNECTORS-232323?style=flat-square&labelColor=1A1A1A)](https://avos.sh/docs/api)
-[![Security](https://img.shields.io/badge/AEGIS_SECURITY-100%2F100_VERIFIED-232323?style=flat-square&labelColor=1A1A1A)](https://avos.sh)
-[![License](https://img.shields.io/badge/LICENSE-OPEN_CORE-797878?style=flat-square&labelColor=1A1A1A)](./LICENSE)
-
-[**Launch on AVOS Cloud (`avos.sh`) →**](https://avos.sh) · [**Try "Roast & Rebuild My Site" (`/roast`) →**](https://avos.sh/roast) · [**API & Webhook Docs →**](https://avos.sh/docs/api)
-
-</div>
-
----
-
-## `01 // WHAT IS AVOS?`
-
-Most AI tools stop at generating code snippets. **AVOS (Autonomous Venture Operating System)** orchestrates **6 specialized Agent Guilds** across engineering, outbound sales, Shopify/Stripe commerce, white-hat security, and legal/tax compliance—governed by a **4-Stage Rust Firewall** and a single human-readable `avos.toml` manifest.
-
-* **⚡ 80% Deterministic / 20% LLM Execution:** Linting, AST parsing (`Tree-sitter`), secret scanning, and DOM verification run as native Rust binaries at **0 tokens**.
-* **🖥️ Herdr × Factory Droid TUI (`avos` & `ac`):** Spawn parallel sub-agents across split terminal panes with real-time `OSC 7501` status rollups (`🟢 WORKING`, `🟡 BLOCKED`, `🔵 DONE`).
-* **🛡️ Zero-Trust by Default:** Tainted-context air-gaps and risk-scoped tool approvals ensure no agent ever touches production or spends money without your 1-click sign-off.
+<h3 align="center"><a href="#install"><ins>Quickstart in 60 Seconds</ins></a></h3>
 
 ---
 
-## `02 // 60-SECOND QUICKSTART (LOCAL CLI)`
+## Features
 
-### 1. Install the Native Rust Binary
+<table>
+<tr>
+<td width="50%" valign="middle">
+
+### Terminal TUI &amp; CLI
+
+Launch the interactive Ratatui workspace with <code>avos</code> or drive missions, autonomy, and loops directly from scripts and CI.
+
+[CLI Source →](crates/avos-cli/src/main.rs)
+
+</td>
+<td width="50%">
 
 ```bash
-# macOS / Linux (Homebrew)
-brew install avos-sh/tap/avos
+# Launch the interactive TUI
+avos
 
-# Or via Cargo (All Platforms)
-cargo install avos-cli
-```
-
-### 2. Initialize a Venture Workspace
-
-```bash
+# Or drive missions directly from the CLI
 avos init my-saas --template b2b-micro-saas
-cd my-saas
+avos mission start "Add unit tests for checkout"
+avos mission list
 ```
 
-### 3. Run Local (BYOK / Ollama) or Connect to AVOS Cloud
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
+
+### Deterministic 80/20 Loops
+
+Execute repeatable YAML workflows like <code>tdd-bug-fixer</code> and <code>icp-lead-scraper</code> with explicit governance approval and command execution flags.
+
+[Stdlib Loops →](stdlib-lite/loops)
+
+</td>
+<td width="50%">
 
 ```bash
-# Option A: Connect to Managed AVOS Cloud (60fps Live VMs + 50 Managed MCPs)
-avos login --cloud
+# Inspect available stdlib loops
+avos loop list
 
-# Option B: Run Self-Hosted Lite with your own API keys or local Ollama
-export ANTHROPIC_API_KEY="sk-ant-..."
-avos mission start "Scaffold Stripe subscriptions and run Aegis RLS audit"
+# Run a loop with explicit governance sign-off
+avos loop run tdd-bug-fixer --approve --exec
 ```
 
----
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
-## `03 // MULTI-AGENT TERMINAL MULTIPLEXER (ac)`
+### Tiered Autonomy (0–4)
 
-Spawn, steer, and synchronize parallel agents directly from your terminal using `ac` (`avosctl`) and `OSC 7501` status rollups:
+Dial agent permissions from strict step-by-step approval up to autonomous local execution—with spend and production-push guards enforced in <code>avos.toml</code>.
+
+[Config Template →](avos.toml.example)
+
+</td>
+<td width="50%">
+
+```toml
+[venture]
+name = "my-saas"
+runtime_mode = "local_lite"
+autonomy_level = 1
+
+[governance]
+require_approval_for_spend = true
+require_approval_for_prod_push = true
+```
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
+
+### Local Daemon &amp; Socket IPC
+
+<code>avos-daemon</code> runs as a fast, single-node Rust runtime communicating over Unix domain sockets (<code>/tmp/avos.sock</code>) with structured JSON-RPC responses.
+
+[Daemon Source →](crates/avos-daemon)
+
+</td>
+<td width="50%">
 
 ```bash
-# Lead Architect spawns a QA Droid in a right split pane and waits for its test report
-ac run --bg --pane split-right qa-droid "Verify Stripe checkout webhook. Done: ac send lead-droid"
+# Check daemon health over JSON-RPC
+avos health
 
-# Dial autonomy from Level 0 (step-by-step approval) to Level 4 (overnight sandbox autonomy)
+# Query or update runtime autonomy
+avos autonomy
 avos autonomy 2
 ```
 
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
+
+### Tiered Model Routing &amp; GBNF
+
+Route tasks across <code>fast_tier</code>, <code>balanced_tier</code>, and <code>architect_tier</code> using local Ollama models or your own API keys, with GBNF grammars for structured tool calls.
+
+[GBNF Grammars →](stdlib-lite/gbnf/tool_call.gbnf)
+
+</td>
+<td width="50%">
+
+```toml
+[models]
+fast_tier = "ollama/qwen3-coder:8b"
+balanced_tier = "anthropic/claude-sonnet-4-6"
+architect_tier = "anthropic/claude-opus-4-6"
+```
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
+
+### Offline Ed25519 Licensing
+
+Verify commercial or pro entitlements completely offline using <code>ed25519-dalek</code> public-key verification—private signing keys never leave the backend.
+
+[License Crate →](crates/avos-license)
+
+</td>
+<td width="50%">
+
+```text
+avos-lite/crates/avos-license
+├── Ed25519 public-key signature verification
+├── Offline license.avoskey entitlement checks
+└── Zero network round-trips required locally
+```
+
+</td>
+</tr>
+</table>
+
+**Also in the box:**
+
+- **[Quickstart Guide](docs/quickstart.md)**: step-by-step setup for local Ollama (`qwen3-coder:8b`) and BYOK API keys.
+- **[Workspace Scaffolding](crates/avos-cli/src/main.rs)**: initialize new venture directories with `avos init <name> --template <template>`.
+- **[Cloud Bridge](crates/avos-cli/src/main.rs)**: run `avos login` when you are ready to connect your local workspace to [AVOS Cloud](https://app.avos.sh).
+
 ---
 
-## `04 // AVOS CLOUD VS. SELF-HOSTED LITE`
+## Supported Model Providers
 
-`avos-lite` gives you a fast, local single-node CLI and daemon. When you are ready for **60fps Live WebRTC Visual Workspaces**, **50 zero-config MCP integrations**, **Multi-Cloud LLM Failover**, and **Autonomous Growth Loops**, upgrade in one command via `avos login --cloud`:
+Works with local runtimes and bring-your-own-key (BYOK) cloud providers configured in `avos.toml`:
 
-| Capability | `avos-lite` (Self-Hosted Open-Core) | **AVOS Cloud (`app.avos.sh`)** |
+<p>
+  <kbd>Ollama (Local)</kbd> &nbsp;
+  <kbd>Anthropic (Claude)</kbd> &nbsp;
+  <kbd>OpenAI</kbd> &nbsp;
+  <kbd>Qwen Coder</kbd> &nbsp;
+  <kbd>DeepSeek</kbd> &nbsp;
+  <kbd>Llama</kbd> &nbsp;
+  <kbd>+ GBNF Structured Tool Calling</kbd>
+</p>
+
+---
+
+## Install
+
+### From Source (Cargo)
+
+Requires Rust `1.85+` (Edition 2024).
+
+```bash
+git clone https://github.com/LukaG712/avos-lite.git
+cd avos-lite
+cargo install --path crates/avos-cli
+```
+
+### Quickstart
+
+```bash
+# 1. Initialize a venture workspace
+avos init my-saas --template b2b-micro-saas
+cd my-saas
+
+# 2. Configure local Ollama or BYOK API keys
+cp ../avos.toml.example avos.toml
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# 3. Start the interactive TUI or launch a mission
+avos tui
+avos mission start "Add unit tests for checkout module"
+```
+
+> See [`docs/quickstart.md`](docs/quickstart.md) for local Ollama setup (`ollama pull qwen3-coder:8b`).
+
+---
+
+## `avos-lite` vs. AVOS Cloud
+
+`avos-lite` is the open-core local CLI and daemon. For managed cloud execution, multi-provider LLM failover, and team billing, see [`LukaG712/avos`](https://github.com/LukaG712/avos) or connect via `avos login`.
+
+| Capability | `avos-lite` (Open-Core Local) | AVOS Platform (`LukaG712/avos`) |
 | :--- | :--- | :--- |
-| **Core CLI (`avos` / `ac`) & `avos.toml`** | ✅ Included | ✅ Included + Multi-Device Cloud Sync |
-| **Model Routing & Prompt Caching** | Single-provider BYOK / Local Ollama | **4-Stage Multi-Cloud Failover (`<50ms`) + 90% Cache Savings** |
-| **Visual Agent Workspaces** | Local terminal PTY logs only | **60fps WebRTC Firecracker VMs, Ghost Cursors & 1-Click Takeover** |
-| **MCP Gateway Connectors** | 6 Basic Local Connectors (Manual Keys) | **All 50 Managed MCPs + 1-Click Ambient OAuth + Custom BYO-MCP** |
-| **Visual Mode & Surface** | Terminal TUI | **Zero-Chrome Web IDE (`☀️ Simple` & `🌙 Pro`), Multiplayer War Room & Mobile Bridge** |
-| **Scale, Agency & HoldCo Engines** | Single Local Project | **HoldCo Cockpit (`Cmd+Shift+H`), White-Label Client Portal & Exit Data Room** |
-
-> **[ // START FREE ON AVOS CLOUD ($0/MO PAYG OR $29 STARTER) → ](https://avos.sh/pricing)**
+| **Core CLI (`avos`), TUI &amp; `avos.toml`** | Included | Included |
+| **Local Daemon &amp; Socket IPC** | Included (`local_lite`) | Included + Cloud Control Plane |
+| **Model Routing** | Local Ollama / Single-Key BYOK | Provider-Agnostic Router + Upstash Credit Locks |
+| **Execution Isolation** | Local workspace | Sandboxed Execution Plane (`avos-sandbox-agent`) |
+| **MCP Security &amp; Gateway** | — | `avos-firewall` + `mcp-gateway` |
+| **Workflow Checkpoints &amp; Billing** | — | `orchestrator-graph` + PostgreSQL/Supabase Ledger |
 
 ---
 
-## `05 // REPOSITORY STRUCTURE`
+## Repository Structure
 
 ```text
 avos-lite/
-├── Cargo.toml                  # Rust workspace (CLI, Local Daemon, Offline License Verifier)
+├── Cargo.toml                  # Rust 2024 workspace manifest
 ├── avos.toml.example           # Single-file venture configuration template
 ├── crates/
-│   ├── avos-cli/               # `avos` & `ac` TUI multiplexer (`OSC 7501` status rollup)
-│   ├── avos-daemon/            # Local single-node runtime (`AVOS_RUNTIME_MODE=local_lite`)
-│   └── avos-license/           # Offline Ed25519 `license.avoskey` cryptographic verifier
+│   ├── avos-cli/               # CLI + Ratatui TUI (`avos`)
+│   ├── avos-daemon/            # Local single-node runtime & JSON-RPC IPC
+│   └── avos-license/           # Offline Ed25519 entitlement verifier
 ├── stdlib-lite/
-│   ├── loops/                  # Open-source 80/20 YAML loops (`tdd-bug-fixer`, `icp-lead-scraper`)
-│   └── gbnf/                   # Pre-compiled GBNF grammars for Qwen-3, DeepSeek & Llama-4
+│   ├── loops/                  # Deterministic YAML loops (`tdd-bug-fixer`, `icp-lead-scraper`)
+│   └── gbnf/                   # GBNF grammar for structured tool calls
 └── docs/
-    └── quickstart.md           # Local CLI, BYOK & Ollama configuration guide
+    └── quickstart.md           # Local CLI, BYOK & Ollama setup guide
 ```
+
+---
+
+## Developing
+
+```bash
+# Check and test all Rust crates
+cargo check --workspace
+cargo test --workspace
+```
+
+## License
+
+`avos-lite` is free and open source under the [MIT License](LICENSE).
