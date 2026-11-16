@@ -50,11 +50,41 @@ fn main() {
             Some("list") => send_rpc(&socket_path, "mission.list", json!({})),
             _ => Err("Usage: avos mission <start|list>".to_string()),
         },
+        Some("loop") => match args.get(2).map(String::as_str) {
+            Some("list") => send_rpc(&socket_path, "loop.list", json!({})),
+            Some("run") => {
+                let target = args.get(3).cloned().unwrap_or_default();
+                if target.is_empty() {
+                    Err("Usage: avos loop run <path_or_name> [--approve]".to_string())
+                } else {
+                    let approved = args.iter().any(|a| a == "--approve");
+                    let target_path = Path::new(&target);
+                    if target_path.exists() {
+                        std::fs::read_to_string(target_path)
+                            .map_err(|e| format!("Failed to read {target}: {e}"))
+                            .and_then(|yaml| {
+                                send_rpc(
+                                    &socket_path,
+                                    "loop.run",
+                                    json!({ "yaml": yaml, "governance_approved": approved }),
+                                )
+                            })
+                    } else {
+                        send_rpc(
+                            &socket_path,
+                            "loop.run",
+                            json!({ "name": target, "governance_approved": approved }),
+                        )
+                    }
+                }
+            }
+            _ => Err("Usage: avos loop <list|run>".to_string()),
+        },
         Some("login") => Ok(json!({
             "cloud_url": "https://app.avos.sh/oauth/cli",
             "status": "open_browser_for_oauth",
         })),
-        _ => Err("AVOS CLI v1.0.0 — Usage: avos [tui] | <init|health|login|mission|autonomy>".to_string()),
+        _ => Err("AVOS CLI v1.0.0 — Usage: avos [tui] | <init|health|login|mission|autonomy|loop>".to_string()),
     };
 
     match res {

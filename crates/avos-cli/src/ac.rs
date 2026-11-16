@@ -34,7 +34,35 @@ fn main() {
             }
         }
         Some("list") => send_rpc(&socket_path, "pane.list", json!({})),
-        _ => Err("ac (avosctl) — Usage: ac <run|send|list>".to_string()),
+        Some("inbox") => {
+            let agent = args.get(2).cloned().unwrap_or_default();
+            if agent.is_empty() {
+                Err("Usage: ac inbox <agent> [--drain]".to_string())
+            } else {
+                let drain = args.iter().any(|a| a == "--drain");
+                send_rpc(
+                    &socket_path,
+                    "pane.inbox",
+                    json!({ "name": agent, "drain": drain }),
+                )
+            }
+        }
+        Some("status") => {
+            let agent = args.get(2).cloned().unwrap_or_default();
+            let status = args.get(3).cloned().unwrap_or_default();
+            let detail = args.get(4).cloned().unwrap_or_default();
+            if agent.is_empty() || status.is_empty() {
+                Err("Usage: ac status <agent> <WORKING|BLOCKED|DONE> [detail]".to_string())
+            } else {
+                print!("{}", format_osc_7501(&agent, &status, &detail));
+                send_rpc(
+                    &socket_path,
+                    "pane.status",
+                    json!({ "name": agent, "status": status }),
+                )
+            }
+        }
+        _ => Err("ac (avosctl) — Usage: ac <run|send|list|inbox|status>".to_string()),
     };
 
     match res {

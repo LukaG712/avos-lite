@@ -1,3 +1,5 @@
+pub mod loops;
+
 use avos_license::LicenseEdition;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -220,6 +222,129 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
             let items: Vec<&AgentPane> = guard.panes.values().collect();
             ok_response(id, json!({ "items": items }))
         }
+        "pane.inbox" => {
+            let Some(name) = req.params.get("name").and_then(|v| v.as_str()) else {
+                return serde_json::to_string(&err_response(id, -32602, "Missing params.name"))
+                    .unwrap();
+            };
+            let drain = req
+                .params
+                .get("drain")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let mut guard = state.lock().unwrap();
+            match guard.panes.get_mut(name) {
+                Some(pane) => {
+                    let messages = pane.inbox.clone();
+                    if drain {
+                        pane.inbox.clear();
+                    }
+                    ok_response(id, json!({ "name": name, "messages": messages }))
+                }
+                None => err_response(id, -32004, format!("Pane not found: {name}")),
+            }
+        }
+        "pane.status" => {
+            let Some(name) = req.params.get("name").and_then(|v| v.as_str()) else {
+                return serde_json::to_string(&err_response(id, -32602, "Missing params.name"))
+                    .unwrap();
+            };
+            let Some(status) = req.params.get("status").and_then(|v| v.as_str()) else {
+                return serde_json::to_string(&err_response(id, -32602, "Missing params.status"))
+                    .unwrap();
+            };
+            let mut guard = state.lock().unwrap();
+            let pane = guard.panes.entry(name.to_string()).or_insert_with(|| AgentPane {
+                name: name.to_string(),
+                status: status.to_string(),
+                inbox: Vec::new(),
+            });
+            pane.status = status.to_string();
+            let cloned = pane.clone();
+            ok_response(id, serde_json::to_value(cloned).unwrap())
+        }
+        "loop.list" => {
+            let dir = req
+                .params
+                .get("dir")
+                .and_then(|v| v.as_str())
+                .unwrap_or("stdlib-lite/loops");
+            let mut items = Vec::new();
+            if let Ok(entries) = fs::read_dir(dir) {
+                let mut paths: Vec<_> = entries
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| {
+                        p.extension()
+                            .and_then(|ext| ext.to_str())
+                            .is_some_and(|ext| ext == "yaml" || ext == "yml")
+                    })
+                    .collect();
+                paths.sort();
+                for p in paths {
+                    if let Ok(def) = loops::load_loop_from_file(&p) {
+                        items.push(json!({
+                            "name": def.name,
+                            "version": def.version,
+                            "steps_count": def.steps.len(),
+                            "path": p.display().to_string(),
+                        }));
+                    }
+                }
+            }
+            if items.is_empty() {
+                for (path, raw) in [
+                    (
+                        "stdlib-lite/loops/icp-lead-scraper.yaml",
+                        include_str!("../../../stdlib-lite/loops/icp-lead-scraper.yaml"),
+                    ),
+                    (
+                        "stdlib-lite/loops/tdd-bug-fixer.yaml",
+                        include_str!("../../../stdlib-lite/loops/tdd-bug-fixer.yaml"),
+                    ),
+                ] {
+                    if let Ok(def) = loops::parse_loop_yaml(raw) {
+                        items.push(json!({
+                            "name": def.name,
+                            "version": def.version,
+                            "steps_count": def.steps.len(),
+                            "path": path,
+                        }));
+                    }
+                }
+            }
+            ok_response(id, json!({ "items": items }))
+        }
+        "loop.run" => {
+            let approved = req
+                .params
+                .get("governance_approved")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let def_res = if let Some(yaml) = req.params.get("yaml").and_then(|v| v.as_str()) {
+                loops::parse_loop_yaml(yaml)
+            } else if let Some(path) = req.params.get("path").and_then(|v| v.as_str()) {
+                loops::load_loop_from_file(Path::new(path))
+            } else if let Some(name) = req.params.get("name").and_then(|v| v.as_str()) {
+                match name {
+                    "tdd-bug-fixer" | "loop/tdd-bug-fixer" => loops::parse_loop_yaml(
+                        include_str!("../../../stdlib-lite/loops/tdd-bug-fixer.yaml"),
+                    ),
+                    "icp-lead-scraper" | "loop/icp-lead-scraper" => loops::parse_loop_yaml(
+                        include_str!("../../../stdlib-lite/loops/icp-lead-scraper.yaml"),
+                    ),
+                    other => Err(format!("Unknown built-in loop: {other}")),
+                }
+            } else {
+                Err("Missing params.path, params.yaml, or params.name".into())
+            };
+            match def_res {
+                Ok(def) => {
+                    let report = loops::simulate_loop_execution(&def, approved);
+                    ok_response(id, serde_json::to_value(report).unwrap())
+                }
+                Err(e) => err_response(id, -32602, e),
+            }
+        }
         other => err_response(id, -32601, format!("Method not found: {other}")),
     };
 
@@ -294,5 +419,54 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(sent["result"]["inbox"][0], "tests passed");
+
+        let status: Value = serde_json::from_str(&handle_rpc_line(
+            &state,
+            r#"{"jsonrpc":"2.0","id":4,"method":"pane.status","params":{"name":"qa-droid","status":"DONE"}}"#,
+        ))
+        .unwrap();
+        assert_eq!(status["result"]["status"], "DONE");
+
+        let inbox: Value = serde_json::from_str(&handle_rpc_line(
+            &state,
+            r#"{"jsonrpc":"2.0","id":5,"method":"pane.inbox","params":{"name":"qa-droid","drain":true}}"#,
+        ))
+        .unwrap();
+        assert_eq!(inbox["result"]["messages"][0], "tests passed");
+
+        let drained: Value = serde_json::from_str(&handle_rpc_line(
+            &state,
+            r#"{"jsonrpc":"2.0","id":6,"method":"pane.inbox","params":{"name":"qa-droid"}}"#,
+        ))
+        .unwrap();
+        assert_eq!(drained["result"]["messages"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn loop_list_and_run_work() {
+        let state = Arc::new(Mutex::new(LiteDaemonState::new(
+            LicenseEdition::CommunityFree,
+        )));
+
+        let listed: Value = serde_json::from_str(&handle_rpc_line(
+            &state,
+            r#"{"jsonrpc":"2.0","id":1,"method":"loop.list","params":{}}"#,
+        ))
+        .unwrap();
+        assert!(listed["result"]["items"].as_array().unwrap().len() >= 2);
+
+        let paused: Value = serde_json::from_str(&handle_rpc_line(
+            &state,
+            r#"{"jsonrpc":"2.0","id":2,"method":"loop.run","params":{"name":"icp-lead-scraper"}}"#,
+        ))
+        .unwrap();
+        assert_eq!(paused["result"]["status"], "PAUSED_GOVERNANCE");
+
+        let completed: Value = serde_json::from_str(&handle_rpc_line(
+            &state,
+            r#"{"jsonrpc":"2.0","id":3,"method":"loop.run","params":{"name":"icp-lead-scraper","governance_approved":true}}"#,
+        ))
+        .unwrap();
+        assert_eq!(completed["result"]["status"], "COMPLETED");
     }
 }
