@@ -20,6 +20,9 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: avos-lite-macos-arm64.tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: avos-lite-macos-x86_64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,12 +31,15 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --workspace --target ${{ matrix.target }}
-      - name: Package release archive
+      - name: Package release archive & checksum
         run: |
           mkdir -p dist
           tar -czf dist/${{ matrix.artifact }} -C target/${{ matrix.target }}/release \
             avos ac avos-daemon avos-license
+          (cd dist && shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256)
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          files: dist/${{ matrix.artifact }}
+          files: |
+            dist/${{ matrix.artifact }}
+            dist/${{ matrix.artifact }}.sha256

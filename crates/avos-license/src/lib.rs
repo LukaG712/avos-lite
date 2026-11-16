@@ -5,10 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Embedded AVOS Ed25519 public verifying key (replace with production keypair at release).
 pub const DEFAULT_AVOS_PUBLIC_KEY: [u8; 32] = [
-    0x3b, 0x6a, 0x27, 0xbc, 0xce, 0xb6, 0xa4, 0x2d,
-    0x62, 0xa3, 0xa8, 0xd0, 0x2a, 0x6f, 0x0d, 0x73,
-    0x65, 0x32, 0x15, 0x77, 0x1d, 0xe2, 0x43, 0xa6,
-    0x3a, 0xc0, 0x48, 0xa1, 0x8b, 0x59, 0xda, 0x29,
+    0x3b, 0x6a, 0x27, 0xbc, 0xce, 0xb6, 0xa4, 0x2d, 0x62, 0xa3, 0xa8, 0xd0, 0x2a, 0x6f, 0x0d, 0x73,
+    0x65, 0x32, 0x15, 0x77, 0x1d, 0xe2, 0x43, 0xa6, 0x3a, 0xc0, 0x48, 0xa1, 0x8b, 0x59, 0xda, 0x29,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,7 +45,10 @@ fn current_unix_timestamp() -> u64 {
 }
 
 /// Signs a `LicenseClaims` payload into `<base64url_payload>.<base64url_signature>`.
-pub fn sign_license(claims: &LicenseClaims, signing_key: &SigningKey) -> Result<String, LicenseError> {
+pub fn sign_license(
+    claims: &LicenseClaims,
+    signing_key: &SigningKey,
+) -> Result<String, LicenseError> {
     let payload_bytes = serde_json::to_vec(claims).map_err(|_| LicenseError::InvalidClaimsJson)?;
     let payload_b64 = URL_SAFE_NO_PAD.encode(&payload_bytes);
     let signature = signing_key.sign(payload_b64.as_bytes());
@@ -195,6 +196,9 @@ mod tests {
     #[test]
     fn empty_key_falls_back_to_community_free() {
         assert_eq!(verify_offline_key(b""), LicenseEdition::CommunityFree);
-        assert_eq!(verify_offline_key(b"AVOS-COMM-FAKE"), LicenseEdition::CommunityFree);
+        assert_eq!(
+            verify_offline_key(b"AVOS-COMM-FAKE"),
+            LicenseEdition::CommunityFree
+        );
     }
 }

@@ -5,7 +5,7 @@ max_leads: 25
 steps:
   - id: extract
     mode: llm
-    tier: fast_02x
+    tier: fast_0_2x
     redact_pii: true
   - id: deduplicate
     mode: deterministic

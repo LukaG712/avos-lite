@@ -97,9 +97,9 @@ pub fn parse_avos_toml(raw: &str) -> Result<AvosConfig, String> {
             ("models", "balanced_tier") => balanced_tier = val.to_string(),
             ("models", "architect_tier") => architect_tier = val.to_string(),
             ("governance", "require_approval_for_spend") => {
-                require_approval_for_spend = val
-                    .parse::<bool>()
-                    .map_err(|_| format!("Invalid boolean for require_approval_for_spend: {val}"))?;
+                require_approval_for_spend = val.parse::<bool>().map_err(|_| {
+                    format!("Invalid boolean for require_approval_for_spend: {val}")
+                })?;
             }
             ("governance", "require_approval_for_prod_push") => {
                 require_approval_for_prod_push = val.parse::<bool>().map_err(|_| {
@@ -139,8 +139,12 @@ pub fn init_workspace(dir: &Path, name: &str, template: &str) -> std::io::Result
 }
 
 pub fn send_rpc(socket_path: &Path, method: &str, params: Value) -> Result<Value, String> {
-    let mut stream = UnixStream::connect(socket_path)
-        .map_err(|e| format!("Failed to connect to avos-daemon at {}: {e}", socket_path.display()))?;
+    let mut stream = UnixStream::connect(socket_path).map_err(|e| {
+        format!(
+            "Failed to connect to avos-daemon at {}: {e}",
+            socket_path.display()
+        )
+    })?;
     let req = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -157,8 +161,8 @@ pub fn send_rpc(socket_path: &Path, method: &str, params: Value) -> Result<Value
     reader
         .read_line(&mut line)
         .map_err(|e| format!("Failed to read RPC response: {e}"))?;
-    let parsed: Value = serde_json::from_str(line.trim())
-        .map_err(|e| format!("Invalid JSON-RPC response: {e}"))?;
+    let parsed: Value =
+        serde_json::from_str(line.trim()).map_err(|e| format!("Invalid JSON-RPC response: {e}"))?;
     if let Some(err) = parsed.get("error") {
         return Err(format!("Daemon error: {err}"));
     }

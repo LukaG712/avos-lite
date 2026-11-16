@@ -61,6 +61,8 @@ pub struct LiteTuiApp {
     pub boot_step: usize,
     pub tick: usize,
     pub input: String,
+    pub cursor: usize,
+    pub scroll_offset: u16,
     pub history: Vec<String>,
     pub history_idx: Option<usize>,
     pub logs: Vec<LogEntry>,
@@ -70,16 +72,17 @@ pub struct LiteTuiApp {
 
 impl LiteTuiApp {
     pub fn new(socket_path: PathBuf) -> Self {
-        let daemon_connected = send_rpc(&socket_path, "system.health", json!({})).is_ok();
-        Self {
+        let mut app = Self {
             socket_path,
-            daemon_connected,
+            daemon_connected: false,
             autonomy_level: 1,
             screen: ScreenMode::StartupAnimation,
             show_sidebar: true,
             boot_step: 0,
             tick: 0,
             input: String::new(),
+            cursor: 0,
+            scroll_offset: 0,
             history: Vec::new(),
             history_idx: None,
             logs: Vec::new(),
@@ -89,6 +92,37 @@ impl LiteTuiApp {
                 ("aegis-droid".into(), "ARMED".into()),
             ],
             should_quit: false,
+        };
+        app.refresh_from_daemon();
+        app
+    }
+
+    pub fn refresh_from_daemon(&mut self) {
+        match send_rpc(&self.socket_path, "system.health", json!({})) {
+            Ok(health) => {
+                self.daemon_connected = true;
+                if let Some(lvl) = health.get("autonomy_level").and_then(|v| v.as_u64()) {
+                    self.autonomy_level = lvl as u8;
+                }
+                if let Ok(pane_res) = send_rpc(&self.socket_path, "pane.list", json!({}))
+                    && let Some(items) = pane_res.get("items").and_then(|v| v.as_array())
+                    && !items.is_empty()
+                {
+                    let mut live: Vec<(String, String)> = items
+                        .iter()
+                        .filter_map(|p| {
+                            let name = p.get("name")?.as_str()?.to_string();
+                            let status = p.get("status")?.as_str()?.to_string();
+                            Some((name, status))
+                        })
+                        .collect();
+                    live.sort_by(|a, b| a.0.cmp(&b.0));
+                    self.panes = live;
+                }
+            }
+            Err(_) => {
+                self.daemon_connected = false;
+            }
         }
     }
 
@@ -98,6 +132,7 @@ impl LiteTuiApp {
             color,
             message: message.into(),
         });
+        self.scroll_offset = self.logs.len().saturating_sub(12) as u16;
         if self.screen == ScreenMode::Welcome {
             self.screen = ScreenMode::Workspace;
         }
@@ -111,6 +146,7 @@ impl LiteTuiApp {
         self.history.push(raw.clone());
         self.history_idx = None;
         self.input.clear();
+        self.cursor = 0;
 
         if raw.starts_with('/') {
             let parts: Vec<&str> = raw.split_whitespace().collect();
@@ -118,6 +154,7 @@ impl LiteTuiApp {
                 Some("/quit") | Some("/exit") | Some("/q") => self.should_quit = true,
                 Some("/clear") => {
                     self.logs.clear();
+                    self.scroll_offset = 0;
                     self.push_log("SYSTEM", ACCENT_CYAN, "Cleared mission feed.");
                 }
                 Some("/welcome") => self.screen = ScreenMode::Welcome,
@@ -125,8 +162,22 @@ impl LiteTuiApp {
                 Some("/help") => self.push_log(
                     "HELP",
                     ACCENT_CYAN,
-                    "Commands: /mission <prompt> | /autonomy <0-4> | /health | /sidebar | /welcome | /clear | /quit",
+                    "Commands: /mission <prompt> | /autonomy <0-4> | /panes | /loops | /health | /sidebar | /welcome | /clear | /quit",
                 ),
+                Some("/panes") => {
+                    self.refresh_from_daemon();
+                    self.push_log("PANES", ACCENT_CYAN, format!("Active panes: {:?}", self.panes));
+                }
+                Some("/loops") => match send_rpc(&self.socket_path, "loop.list", json!({})) {
+                    Ok(res) => {
+                        self.daemon_connected = true;
+                        self.push_log("LOOPS", ACCENT_GREEN, format!("{res}"));
+                    }
+                    Err(e) => {
+                        self.daemon_connected = false;
+                        self.push_log("LOOPS", ACCENT_AMBER, format!("Daemon offline ({e})"));
+                    }
+                },
                 Some("/health") => match send_rpc(&self.socket_path, "system.health", json!({})) {
                     Ok(res) => {
                         self.daemon_connected = true;
@@ -168,7 +219,11 @@ impl LiteTuiApp {
 
     fn dispatch_mission(&mut self, prompt: &str) {
         self.push_log("USER", FG_PRIMARY, prompt.to_string());
-        match send_rpc(&self.socket_path, "mission.create", json!({ "prompt": prompt })) {
+        match send_rpc(
+            &self.socket_path,
+            "mission.create",
+            json!({ "prompt": prompt }),
+        ) {
             Ok(res) => {
                 self.daemon_connected = true;
                 self.panes[0].1 = "WORKING".into();
@@ -177,14 +232,21 @@ impl LiteTuiApp {
             Err(_) => {
                 self.daemon_connected = false;
                 self.panes[0].1 = "LOCAL".into();
-                self.push_log("MISSION", ACCENT_AMBER, format!("Queued locally: \"{prompt}\""));
+                self.push_log(
+                    "MISSION",
+                    ACCENT_AMBER,
+                    format!("Queued locally: \"{prompt}\""),
+                );
             }
         }
     }
 
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        frame.render_widget(Block::default().style(Style::default().bg(BG_PRIMARY)), area);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(BG_PRIMARY)),
+            area,
+        );
 
         if self.screen == ScreenMode::StartupAnimation {
             self.render_startup_animation(frame, area);
@@ -218,7 +280,9 @@ impl LiteTuiApp {
             daemon_badge,
             Span::styled(
                 format!(" │ AUTONOMY L{} ", self.autonomy_level),
-                Style::default().fg(ACCENT_CYAN).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(ACCENT_CYAN)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]))
         .block(
@@ -240,16 +304,27 @@ impl LiteTuiApp {
             self.render_main_pane(frame, root[1]);
         }
 
+        let cursor_pos = self.cursor.min(self.input.len());
+        let (before, after) = self.input.split_at(cursor_pos);
         let prompt = Paragraph::new(Line::from(vec![
-            Span::styled(" ❯ ", Style::default().fg(ACCENT_GREEN).add_modifier(Modifier::BOLD)),
-            Span::styled(self.input.clone(), Style::default().fg(FG_PRIMARY)),
+            Span::styled(
+                " ❯ ",
+                Style::default()
+                    .fg(ACCENT_GREEN)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(before.to_string(), Style::default().fg(FG_PRIMARY)),
             Span::styled("█", Style::default().fg(ACCENT_CYAN)),
+            Span::styled(after.to_string(), Style::default().fg(FG_PRIMARY)),
         ]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ACCENT_GREEN))
-                .title(Span::styled(" COMMAND / MISSION PROMPT ", Style::default().fg(FG_MUTED)))
+                .title(Span::styled(
+                    " COMMAND / MISSION PROMPT ",
+                    Style::default().fg(FG_MUTED),
+                ))
                 .style(Style::default().bg(BG_WELL)),
         );
         frame.render_widget(prompt, root[2]);
@@ -293,9 +368,17 @@ impl LiteTuiApp {
         let banner_lines: Vec<Line> = AVOS_BANNER
             .iter()
             .take(visible_lines)
-            .map(|l| Line::from(Span::styled(*l, Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD))))
+            .map(|l| {
+                Line::from(Span::styled(
+                    *l,
+                    Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD),
+                ))
+            })
             .collect();
-        frame.render_widget(Paragraph::new(banner_lines).alignment(Alignment::Center), chunks[1]);
+        frame.render_widget(
+            Paragraph::new(banner_lines).alignment(Alignment::Center),
+            chunks[1],
+        );
 
         let ratio = ((self.boot_step + 1).min(3) as f64) / 3.0;
         let spin = SPINNER[self.tick % SPINNER.len()];
@@ -304,7 +387,10 @@ impl LiteTuiApp {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(BORDER_HAIRLINE))
-                    .title(Span::styled(format!(" {spin} BOOTING AVOS-LITE "), Style::default().fg(ACCENT_CYAN))),
+                    .title(Span::styled(
+                        format!(" {spin} BOOTING AVOS-LITE "),
+                        Style::default().fg(ACCENT_CYAN),
+                    )),
             )
             .gauge_style(Style::default().fg(ACCENT_GREEN).bg(BG_PRIMARY))
             .ratio(ratio);
@@ -347,12 +433,19 @@ impl LiteTuiApp {
 
             let mut lines: Vec<Line> = AVOS_BANNER
                 .iter()
-                .map(|l| Line::from(Span::styled(*l, Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD))))
+                .map(|l| {
+                    Line::from(Span::styled(
+                        *l,
+                        Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD),
+                    ))
+                })
                 .collect();
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "AVOS-LITE // OPEN-CORE DROID TUI (OSC 7501)",
-                Style::default().fg(ACCENT_CYAN).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(ACCENT_CYAN)
+                    .add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
@@ -373,21 +466,24 @@ impl LiteTuiApp {
                 Line::from(vec![
                     Span::styled(
                         format!(" [{}] ", entry.tag),
-                        Style::default().fg(entry.color).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(entry.color)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(entry.message.clone(), Style::default().fg(FG_PRIMARY)),
                 ])
             })
             .collect();
-        let para = Paragraph::new(items)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(BORDER_HAIRLINE))
-                    .title(Span::styled(" MISSION STREAM ", Style::default().fg(FG_PRIMARY)))
-                    .style(Style::default().bg(BG_WELL)),
-            );
+        let para = Paragraph::new(items).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BORDER_HAIRLINE))
+                .title(Span::styled(
+                    " MISSION STREAM ",
+                    Style::default().fg(FG_PRIMARY),
+                ))
+                .style(Style::default().bg(BG_WELL)),
+        );
         frame.render_widget(para, area);
     }
 
@@ -412,7 +508,10 @@ impl LiteTuiApp {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(BORDER_HAIRLINE))
-                .title(Span::styled(" AGENT PANES ", Style::default().fg(FG_PRIMARY)))
+                .title(Span::styled(
+                    " AGENT PANES ",
+                    Style::default().fg(FG_PRIMARY),
+                ))
                 .style(Style::default().bg(BG_WELL)),
         );
         frame.render_widget(list, area);
@@ -422,7 +521,11 @@ impl LiteTuiApp {
 fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
     let vert = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(height), Constraint::Min(0)])
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(height),
+            Constraint::Min(0),
+        ])
         .split(r);
     Layout::default()
         .direction(Direction::Horizontal)
@@ -485,8 +588,41 @@ fn run_tui_loop<B: Backend>(terminal: &mut Terminal<B>, socket_path: &Path) -> i
             match key.code {
                 KeyCode::F(2) => app.show_sidebar = !app.show_sidebar,
                 KeyCode::Enter => app.submit_input(),
+                KeyCode::PageUp => {
+                    app.scroll_offset = app.scroll_offset.saturating_sub(3);
+                }
+                KeyCode::PageDown => {
+                    app.scroll_offset = app.scroll_offset.saturating_add(3);
+                }
+                KeyCode::Left => {
+                    if app.cursor > 0 {
+                        let mut pos = app.cursor - 1;
+                        while pos > 0 && !app.input.is_char_boundary(pos) {
+                            pos -= 1;
+                        }
+                        app.cursor = pos;
+                    }
+                }
+                KeyCode::Right => {
+                    if app.cursor < app.input.len() {
+                        let mut pos = app.cursor + 1;
+                        while pos < app.input.len() && !app.input.is_char_boundary(pos) {
+                            pos += 1;
+                        }
+                        app.cursor = pos;
+                    }
+                }
+                KeyCode::Home => app.cursor = 0,
+                KeyCode::End => app.cursor = app.input.len(),
                 KeyCode::Backspace => {
-                    app.input.pop();
+                    if app.cursor > 0 {
+                        let mut prev = app.cursor - 1;
+                        while prev > 0 && !app.input.is_char_boundary(prev) {
+                            prev -= 1;
+                        }
+                        app.input.remove(prev);
+                        app.cursor = prev;
+                    }
                 }
                 KeyCode::Up => {
                     if !app.history.is_empty() {
@@ -496,6 +632,7 @@ fn run_tui_loop<B: Backend>(terminal: &mut Terminal<B>, socket_path: &Path) -> i
                         };
                         app.history_idx = Some(next);
                         app.input = app.history[next].clone();
+                        app.cursor = app.input.len();
                     }
                 }
                 KeyCode::Down => {
@@ -503,17 +640,25 @@ fn run_tui_loop<B: Backend>(terminal: &mut Terminal<B>, socket_path: &Path) -> i
                         if i + 1 < app.history.len() {
                             app.history_idx = Some(i + 1);
                             app.input = app.history[i + 1].clone();
+                            app.cursor = app.input.len();
                         } else {
                             app.history_idx = None;
                             app.input.clear();
+                            app.cursor = 0;
                         }
                     }
                 }
-                KeyCode::Char(c) => app.input.push(c),
+                KeyCode::Char(c) => {
+                    app.input.insert(app.cursor, c);
+                    app.cursor += c.len_utf8();
+                }
                 _ => {}
             }
         }
         app.tick = app.tick.wrapping_add(1);
+        if app.tick.is_multiple_of(16) && app.screen != ScreenMode::StartupAnimation {
+            app.refresh_from_daemon();
+        }
     }
     Ok(())
 }
@@ -545,5 +690,9 @@ mod tests {
         app.submit_input();
         assert_eq!(app.autonomy_level, 2);
         assert_eq!(app.screen, ScreenMode::Workspace);
+
+        app.input = "/panes".into();
+        app.submit_input();
+        assert!(app.logs.iter().any(|l| l.tag == "PANES"));
     }
 }

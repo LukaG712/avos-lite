@@ -1,11 +1,14 @@
+pub mod config;
 pub mod loops;
 
 use avos_license::LicenseEdition;
+use config::DaemonConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -47,6 +50,8 @@ pub struct LiteMission {
 pub struct AgentPane {
     pub name: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pane_layout: Option<String>,
     pub inbox: Vec<String>,
 }
 
@@ -54,16 +59,22 @@ pub struct LiteDaemonState {
     pub runtime_mode: String,
     pub license_edition: LicenseEdition,
     pub autonomy_level: u8,
+    pub config: DaemonConfig,
     pub missions: Vec<LiteMission>,
     pub panes: HashMap<String, AgentPane>,
 }
 
 impl LiteDaemonState {
     pub fn new(license_edition: LicenseEdition) -> Self {
+        Self::with_config(license_edition, DaemonConfig::default())
+    }
+
+    pub fn with_config(license_edition: LicenseEdition, config: DaemonConfig) -> Self {
         Self {
-            runtime_mode: "local_lite".to_string(),
+            runtime_mode: config.runtime_mode.clone(),
             license_edition,
-            autonomy_level: 1,
+            autonomy_level: config.autonomy_level,
+            config,
             missions: Vec::new(),
             panes: HashMap::new(),
         }
@@ -120,6 +131,9 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
                     "runtime_mode": guard.runtime_mode,
                     "license_edition": guard.license_edition,
                     "autonomy_level": guard.autonomy_level,
+                    "venture_name": guard.config.venture_name,
+                    "panes_count": guard.panes.len(),
+                    "missions_count": guard.missions.len(),
                 }),
             )
         }
@@ -188,13 +202,25 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
                 .and_then(|v| v.as_str())
                 .unwrap_or("WORKING")
                 .to_string();
+            let pane_layout = req
+                .params
+                .get("pane")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             let mut guard = state.lock().unwrap();
-            let pane = guard.panes.entry(name.to_string()).or_insert_with(|| AgentPane {
-                name: name.to_string(),
-                status: status.clone(),
-                inbox: Vec::new(),
-            });
+            let pane = guard
+                .panes
+                .entry(name.to_string())
+                .or_insert_with(|| AgentPane {
+                    name: name.to_string(),
+                    status: status.clone(),
+                    pane_layout: pane_layout.clone(),
+                    inbox: Vec::new(),
+                });
             pane.status = status;
+            if pane_layout.is_some() {
+                pane.pane_layout = pane_layout;
+            }
             let cloned = pane.clone();
             ok_response(id, serde_json::to_value(cloned).unwrap())
         }
@@ -208,11 +234,15 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
                     .unwrap();
             };
             let mut guard = state.lock().unwrap();
-            let pane = guard.panes.entry(target.to_string()).or_insert_with(|| AgentPane {
-                name: target.to_string(),
-                status: "WORKING".to_string(),
-                inbox: Vec::new(),
-            });
+            let pane = guard
+                .panes
+                .entry(target.to_string())
+                .or_insert_with(|| AgentPane {
+                    name: target.to_string(),
+                    status: "WORKING".to_string(),
+                    pane_layout: None,
+                    inbox: Vec::new(),
+                });
             pane.inbox.push(message.to_string());
             let cloned = pane.clone();
             ok_response(id, serde_json::to_value(cloned).unwrap())
@@ -254,11 +284,15 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
                     .unwrap();
             };
             let mut guard = state.lock().unwrap();
-            let pane = guard.panes.entry(name.to_string()).or_insert_with(|| AgentPane {
-                name: name.to_string(),
-                status: status.to_string(),
-                inbox: Vec::new(),
-            });
+            let pane = guard
+                .panes
+                .entry(name.to_string())
+                .or_insert_with(|| AgentPane {
+                    name: name.to_string(),
+                    status: status.to_string(),
+                    pane_layout: None,
+                    inbox: Vec::new(),
+                });
             pane.status = status.to_string();
             let cloned = pane.clone();
             ok_response(id, serde_json::to_value(cloned).unwrap())
@@ -331,9 +365,9 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
                 loops::load_loop_from_file(Path::new(path))
             } else if let Some(name) = req.params.get("name").and_then(|v| v.as_str()) {
                 match name {
-                    "tdd-bug-fixer" | "loop/tdd-bug-fixer" => loops::parse_loop_yaml(
-                        include_str!("../../../stdlib-lite/loops/tdd-bug-fixer.yaml"),
-                    ),
+                    "tdd-bug-fixer" | "loop/tdd-bug-fixer" => loops::parse_loop_yaml(include_str!(
+                        "../../../stdlib-lite/loops/tdd-bug-fixer.yaml"
+                    )),
                     "icp-lead-scraper" | "loop/icp-lead-scraper" => loops::parse_loop_yaml(
                         include_str!("../../../stdlib-lite/loops/icp-lead-scraper.yaml"),
                     ),
@@ -349,12 +383,20 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
                         .get("llm_endpoint")
                         .and_then(|v| v.as_str())
                         .map(str::to_string)
-                        .or_else(|| std::env::var("OLLAMA_BASE_URL").ok().filter(|s| !s.is_empty()));
+                        .or_else(|| {
+                            std::env::var("OLLAMA_BASE_URL")
+                                .ok()
+                                .filter(|s| !s.is_empty())
+                        });
                     let llm_model = req
                         .params
                         .get("llm_model")
                         .and_then(|v| v.as_str())
                         .map(str::to_string);
+                    let models_config = {
+                        let guard = state.lock().unwrap();
+                        guard.config.models.clone()
+                    };
                     let report = loops::execute_loop_with_options(
                         &def,
                         &loops::LoopExecOptions {
@@ -362,6 +404,7 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
                             execute_commands,
                             llm_endpoint,
                             llm_model,
+                            models_config: Some(models_config),
                         },
                     );
                     ok_response(id, serde_json::to_value(report).unwrap())
@@ -396,11 +439,15 @@ fn handle_client(stream: UnixStream, state: Arc<Mutex<LiteDaemonState>>) {
     }
 }
 
-pub fn serve_unix_socket(socket_path: &Path, state: Arc<Mutex<LiteDaemonState>>) -> std::io::Result<()> {
+pub fn serve_unix_socket(
+    socket_path: &Path,
+    state: Arc<Mutex<LiteDaemonState>>,
+) -> std::io::Result<()> {
     if socket_path.exists() {
         let _ = fs::remove_file(socket_path);
     }
     let listener = UnixListener::bind(socket_path)?;
+    let _ = fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600));
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -492,5 +539,40 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(completed["result"]["status"], "COMPLETED");
+    }
+
+    #[test]
+    fn serves_real_unix_socket_requests() {
+        let sock_path =
+            std::env::temp_dir().join(format!("avos_lite_sock_{}.sock", std::process::id()));
+        let _ = fs::remove_file(&sock_path);
+        let listener = UnixListener::bind(&sock_path).unwrap();
+        let state = Arc::new(Mutex::new(LiteDaemonState::new(
+            LicenseEdition::CommunityFree,
+        )));
+
+        let server_state = Arc::clone(&state);
+        let handle = thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                handle_client(stream, server_state);
+            }
+        });
+
+        let mut client = UnixStream::connect(&sock_path).unwrap();
+        client
+            .write_all(
+                b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"system.health\",\"params\":{}}\n",
+            )
+            .unwrap();
+        client.flush().unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut reader = BufReader::new(client);
+        let mut resp_line = String::new();
+        reader.read_line(&mut resp_line).unwrap();
+        let parsed: Value = serde_json::from_str(resp_line.trim()).unwrap();
+        assert_eq!(parsed["result"]["status"], "ok");
+
+        handle.join().unwrap();
+        let _ = fs::remove_file(&sock_path);
     }
 }
