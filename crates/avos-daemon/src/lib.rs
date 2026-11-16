@@ -344,7 +344,26 @@ pub fn handle_rpc_line(state: &Arc<Mutex<LiteDaemonState>>, line: &str) -> Strin
             };
             match def_res {
                 Ok(def) => {
-                    let report = loops::execute_loop(&def, approved, execute_commands);
+                    let llm_endpoint = req
+                        .params
+                        .get("llm_endpoint")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                        .or_else(|| std::env::var("OLLAMA_BASE_URL").ok().filter(|s| !s.is_empty()));
+                    let llm_model = req
+                        .params
+                        .get("llm_model")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    let report = loops::execute_loop_with_options(
+                        &def,
+                        &loops::LoopExecOptions {
+                            governance_approved: approved,
+                            execute_commands,
+                            llm_endpoint,
+                            llm_model,
+                        },
+                    );
                     ok_response(id, serde_json::to_value(report).unwrap())
                 }
                 Err(e) => err_response(id, -32602, e),

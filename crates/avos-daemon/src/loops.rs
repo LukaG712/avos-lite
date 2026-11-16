@@ -104,6 +104,14 @@ pub fn load_loop_from_file(path: &Path) -> Result<LoopDefinition, String> {
     parse_loop_yaml(&raw)
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct LoopExecOptions {
+    pub governance_approved: bool,
+    pub execute_commands: bool,
+    pub llm_endpoint: Option<String>,
+    pub llm_model: Option<String>,
+}
+
 /// Evaluates a loop plan, pausing on `governance_gate` unless `governance_approved` is true.
 pub fn simulate_loop_execution(def: &LoopDefinition, governance_approved: bool) -> LoopRunReport {
     execute_loop(def, governance_approved, false)
@@ -116,6 +124,20 @@ pub fn execute_loop(
     governance_approved: bool,
     execute_commands: bool,
 ) -> LoopRunReport {
+    execute_loop_with_options(
+        def,
+        &LoopExecOptions {
+            governance_approved,
+            execute_commands,
+            llm_endpoint: None,
+            llm_model: None,
+        },
+    )
+}
+
+pub fn execute_loop_with_options(def: &LoopDefinition, opts: &LoopExecOptions) -> LoopRunReport {
+    let governance_approved = opts.governance_approved;
+    let execute_commands = opts.execute_commands;
     let mut results = Vec::new();
     for step in &def.steps {
         match step.mode {
@@ -178,15 +200,75 @@ pub fn execute_loop(
                     });
                 }
             }
-            StepMode::Llm => results.push(LoopRunStepResult {
-                step_id: step.id.clone(),
-                mode: step.mode.clone(),
-                status: "EXECUTED".into(),
-                detail: format!(
-                    "tier={}",
-                    step.tier.as_deref().unwrap_or("balanced_1x")
-                ),
-            }),
+            StepMode::Llm => {
+                if let Some(base_url) = opts.llm_endpoint.as_deref() {
+                    let model = opts
+                        .llm_model
+                        .as_deref()
+                        .unwrap_or("qwen3-coder:8b");
+                    let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+                    let payload = serde_json::json!({
+                        "model": model,
+                        "prompt": format!("Execute loop step '{}' (tier={})", step.id, step.tier.as_deref().unwrap_or("balanced_1x")),
+                        "stream": false,
+                    });
+                    match std::process::Command::new("curl")
+                        .args(["-sS", "-f", "-X", "POST", "-H", "Content-Type: application/json", "-d", &payload.to_string(), &url])
+                        .output()
+                    {
+                        Ok(out) if out.status.success() => {
+                            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                            let detail = serde_json::from_str::<serde_json::Value>(&raw)
+                                .ok()
+                                .and_then(|v| v.get("response").and_then(|r| r.as_str()).map(str::to_string))
+                                .unwrap_or(raw);
+                            results.push(LoopRunStepResult {
+                                step_id: step.id.clone(),
+                                mode: step.mode.clone(),
+                                status: "EXECUTED".into(),
+                                detail,
+                            });
+                        }
+                        Ok(out) => {
+                            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                            results.push(LoopRunStepResult {
+                                step_id: step.id.clone(),
+                                mode: step.mode.clone(),
+                                status: "FAILED".into(),
+                                detail: if err.is_empty() { "LLM HTTP error".into() } else { err },
+                            });
+                            return LoopRunReport {
+                                loop_name: def.name.clone(),
+                                status: "FAILED".into(),
+                                results,
+                            };
+                        }
+                        Err(e) => {
+                            results.push(LoopRunStepResult {
+                                step_id: step.id.clone(),
+                                mode: step.mode.clone(),
+                                status: "FAILED".into(),
+                                detail: format!("Failed to invoke curl: {e}"),
+                            });
+                            return LoopRunReport {
+                                loop_name: def.name.clone(),
+                                status: "FAILED".into(),
+                                results,
+                            };
+                        }
+                    }
+                } else {
+                    results.push(LoopRunStepResult {
+                        step_id: step.id.clone(),
+                        mode: step.mode.clone(),
+                        status: "EXECUTED".into(),
+                        detail: format!(
+                            "tier={}",
+                            step.tier.as_deref().unwrap_or("balanced_1x")
+                        ),
+                    });
+                }
+            }
             StepMode::GovernanceGate => {
                 if !governance_approved {
                     results.push(LoopRunStepResult {
@@ -226,6 +308,8 @@ pub fn execute_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
 
     #[test]
     fn parses_tdd_bug_fixer_yaml() {
@@ -271,5 +355,46 @@ steps:
         assert_eq!(report.results.len(), 2);
         assert_eq!(report.results[0].detail, "hello-avos-lite");
         assert_eq!(report.results[1].status, "FAILED");
+    }
+
+    #[test]
+    fn calls_local_ollama_endpoint_when_configured() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let body = r#"{"response":"patched bug via ollama"}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+
+        let yaml = r#"
+name: loop/ollama-test
+version: 1.0.0
+steps:
+  - id: generate_patch
+    mode: llm
+    tier: fast_0_2x
+"#;
+        let parsed = parse_loop_yaml(yaml).unwrap();
+        let report = execute_loop_with_options(
+            &parsed,
+            &LoopExecOptions {
+                governance_approved: false,
+                execute_commands: false,
+                llm_endpoint: Some(format!("http://{addr}")),
+                llm_model: Some("qwen3-coder:8b".into()),
+            },
+        );
+        handle.join().unwrap();
+        assert_eq!(report.status, "COMPLETED");
+        assert_eq!(report.results[0].detail, "patched bug via ollama");
     }
 }
